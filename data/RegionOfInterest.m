@@ -112,6 +112,84 @@ classdef RegionOfInterest < Copyable
             end
         end
         
+        function invert(this)
+            this.pixelSelection = ~this.pixelSelection;
+            
+            this.notify('PixelSelectionChanged');
+        end
+        
+        function shiftLeft(this, distance)
+            maxDistance = find(sum(this.pixelSelection, 1) > 0, 1, 'first');
+            newPos = maxDistance - distance;
+            
+            if(newPos < 1)
+                distance = maxDistance - 1;
+            end
+            
+            if(distance > 0)
+                newPixelSelection = zeros(size(this.pixelSelection));
+                newPixelSelection(:, 1:end-distance) = this.pixelSelection(:, (distance+1):end);
+
+                this.pixelSelection = newPixelSelection;
+
+                this.notify('PixelSelectionChanged');
+            end
+        end
+        
+        function shiftRight(this, distance)
+            maxDistance = find(sum(this.pixelSelection, 1) > 0, 1, 'last');
+            newPos = maxDistance + distance;
+            
+            if(newPos > size(this.pixelSelection, 2))
+                distance = size(this.pixelSelection, 2) - maxDistance;
+            end
+            
+            if(distance > 0)
+                newPixelSelection = zeros(size(this.pixelSelection));
+                newPixelSelection(:, (distance+1):end) = this.pixelSelection(:, 1:end-distance);
+
+                this.pixelSelection = newPixelSelection;
+
+                this.notify('PixelSelectionChanged');
+            end
+        end
+        
+        function shiftUp(this, distance)
+            maxDistance = find(sum(this.pixelSelection, 2) > 0, 1, 'first');
+            newPos = maxDistance - distance;
+            
+            if(newPos < 1)
+                distance = maxDistance - 1;
+            end
+            
+            if(distance > 0)
+                newPixelSelection = zeros(size(this.pixelSelection));
+                newPixelSelection(1:end-distance) = this.pixelSelection((distance+1):end);
+
+                this.pixelSelection = newPixelSelection;
+
+                this.notify('PixelSelectionChanged');
+            end
+        end
+        
+        function shiftDown(this, distance)
+            maxDistance = find(sum(this.pixelSelection, 2) > 0, 1, 'last');
+            newPos = maxDistance + distance;
+            
+            if(newPos > size(this.pixelSelection, 1))
+                distance = size(this.pixelSelection, 1) - maxDistance;
+            end
+            
+            if(distance > 0)
+                newPixelSelection = zeros(size(this.pixelSelection));
+                newPixelSelection((distance+1):end, :) = this.pixelSelection(1:end-distance, :);
+
+                this.pixelSelection = newPixelSelection;
+
+                this.notify('PixelSelectionChanged');
+            end
+        end
+        
         function bool = containsPixel(this, x, y)
             bool = this.pixelSelection(y, x);
         end
@@ -172,6 +250,7 @@ classdef RegionOfInterest < Copyable
                 fprintf(fileID, '<pixel x="%d" y="%d" />\n', pixels(i, 1), pixels(i, 2));
             end
             
+            XMLHelper.indent(fileID, indent+1);
             fprintf(fileID, '</pixelList>\n');
             
             XMLHelper.indent(fileID, indent);            

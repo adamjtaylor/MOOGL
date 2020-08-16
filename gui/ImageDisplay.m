@@ -3,10 +3,19 @@ classdef ImageDisplay < Display
         imageHandle;
         
         regionOfInterestList;
+        
+        isDiverging = false;
+    end
+    
+    properties (Constant)
+        defaultColourmap = Viridis;
     end
     
     properties (Access = protected)
-        colourMap = viridis(256);
+        
+        colourMap;
+        colourMapData;
+        
         axisVisibility = 'off';
         colourBarOn = 1;
         
@@ -14,6 +23,9 @@ classdef ImageDisplay < Display
         maxValueToDisplay = 1;
         
         equaliseHistogram = 0;
+        
+        colourMaps;
+        colourMapMenuItem;
         
         dataToVisualise;
     end
@@ -33,6 +45,7 @@ classdef ImageDisplay < Display
             
             obj.regionOfInterestList = RegionOfInterestList();
             
+            obj.setColourMap(ImageDisplay.defaultColourmap);
             obj.updateDisplay();
             
             addlistener(image, 'DataChanged', @(src, evnt)obj.updateDisplay());
@@ -45,6 +58,8 @@ classdef ImageDisplay < Display
             if(this.minValueToDisplay == this.maxValueToDisplay)
                 this.minValueToDisplay = 0;
             end
+            
+            title(this.axisHandle, data.description);
             
             setData@Display(this, data);
         end
@@ -77,6 +92,10 @@ classdef ImageDisplay < Display
             display.copy(obj);
         end
         
+        function exportToImageFile(this, filename)
+            print(this.parent.getParentFigure().handle, filename, '-dpng', '-painters', '-r600');
+        end
+        
         function exportToImage(obj)
             [fileName, pathName, filterIndex] = uiputfile([obj.lastSavedPath 'image.pdf'], 'Export image');
             
@@ -102,7 +121,7 @@ classdef ImageDisplay < Display
 %                 export_fig(f, [pathName filesep fileName], '-painters', '-transparent');
 
                 newAxis = copyobj(obj.axisHandle, f);
-                colormap(f, obj.colourMap);
+                colormap(f, obj.colourMapData);
                 
                 
                 cb = colorbar(newAxis, 'southoutside');
@@ -155,11 +174,12 @@ classdef ImageDisplay < Display
         end
         
         function setDivergingColourMap(this)
+            this.isDiverging = true;
+            
             minVal = min(0, min(this.data.imageData(:)));
             maxVal = max(0, max(this.data.imageData(:)));
             
             %             scale = (maxVal - minVal) / 64;
-            
             scaleSize = 256;
             zeroLoc = round((abs(minVal) / (maxVal - minVal)) * scaleSize);
             
@@ -186,7 +206,22 @@ classdef ImageDisplay < Display
         end
         
         function setColourMap(obj, colourMap)
-            obj.colourMap = colourMap;
+            if(isa(colourMap, 'Colourmap'))
+                obj.colourMapData = colourMap.getColourMap();
+                
+                % Ensure the correct colour map is denoted as selected
+                for i = 1:length(obj.colourMapMenuItem)
+                    if(strcmp(get(obj.colourMapMenuItem(i), 'Label'), colourMap.Name))
+                        set(obj.colourMapMenuItem(i), 'Checked', 'on');
+                    else
+                        set(obj.colourMapMenuItem(i), 'Checked', 'off');
+                    end
+                end
+            else
+                obj.colourMapData = colourMap;
+            end
+            
+%             obj.colourMap = colourMap;
             
             obj.updateDisplay();
         end
@@ -259,9 +294,16 @@ classdef ImageDisplay < Display
             
             set(obj.imageHandle, 'AlphaData', 1);
 %             
+            if(isempty(obj.colourMapData))
+                obj.colourMapData = obj.defaultColourmap.getColourMap();
+            end
             
+            if(isa(obj.colourMapData, 'Colourmap'))
+                obj.colourMapData = obj.colourMapData.getColourMap();
+            end
             
-            colormap(obj.axisHandle, obj.colourMap);
+%             obj.colourMapData
+            colormap(obj.axisHandle, obj.colourMapData);
             set(obj.axisHandle, 'Visible', obj.axisVisibility);
             
             if(obj.colourBarOn)
@@ -286,7 +328,23 @@ classdef ImageDisplay < Display
                     alphaChannel = zeros(size(obj.data.imageData));
                     
                     for i = 1:numel(roisToDisplay)
-                        roiImage = roiImage + double(roisToDisplay{i}.getImage());
+%                         roisToDisplay{i}.getImage()
+                        currentROIImage = roisToDisplay{i}.getImage();
+                        if size(currentROIImage, 1) < size(roiImage, 1)
+                            currentROIImage(size(roiImage, 1), 1, :) = 0;
+                        end
+                        if size(currentROIImage, 2) < size(roiImage, 2)
+                            size(roiImage, 2)
+                            currentROIImage(1, size(roiImage, 2), :) = 0;
+                        end
+                        if size(currentROIImage, 1) > size(roiImage, 1)
+                            currentROIImage = currentROIImage(1:size(roiImage, 1), :, :);
+                        end
+                        if size(currentROIImage, 2) > size(roiImage, 2)
+                            currentROIImage = currentROIImage(:, 1:size(roiImage, 2), :);
+                        end
+
+                        roiImage = roiImage + double(currentROIImage);
 
                         alphaChannel = alphaChannel + (sum(roiImage, 3) ~= 0);
     %                     roiImage = (roiImage ./ 255);
@@ -315,13 +373,47 @@ classdef ImageDisplay < Display
             % changed
             updateDisplay@Display(obj);
         end
+        
+        function createContextMenu(obj)
+            createContextMenu@Display(obj);
+            
+            uimenu(obj.exportMenu, 'Label', 'To CSV', 'Callback', @(src, evnt)obj.exportToCSV());
+            
+            % Checks if getSubclasses is on the path, if so likely to be
+            % SpectralAnalysis running, so add in the colour map menu
+            % automatically
+            if(exist('getSubclasses', 'file'))
+                [obj.colourMaps, classNames] = getSubclasses('Colourmap', 0);
+                
+                obj.addColourmapMenu(obj.colourMaps, classNames);
+            end
+        end
+        
+        function addColourmapMenu(obj, colourMaps, classNames)
+            % addColourmapMenu Toggle the display between continuous and discrete.
+            %
+            %   addColourmapMenu()
+            
+            labelPeaks = uimenu(obj.contextMenu, 'Label', 'Colourmaps', 'Separator', 'on');
+            
+            for i = 1:length(classNames)
+                obj.colourMapMenuItem(i) = uimenu(labelPeaks, 'Label', classNames{i}, 'Callback', @(src, evnt)obj.setColourMap(eval(colourMaps{i})));
+            end
+        end
     end
     
     methods (Access = protected)
         function copy(obj, oldobj)
-            obj.colourMap = oldobj.colourMap;
+            obj.setColourMap(oldobj.colourMap);
+            
             obj.axisVisibility = oldobj.axisVisibility;
             obj.colourBarOn = oldobj.colourBarOn;
+            
+            obj.regionOfInterestList = oldobj.regionOfInterestList;
+            
+            if(oldobj.isDiverging)
+                obj.setDivergingColourMap()
+            end
             
             obj.updateDisplay();
         end
